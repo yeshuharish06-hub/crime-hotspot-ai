@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Patrol Command Center • Crime Hotspot AI</title>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <style>
+      body {
+        background: #070b14;
+        color: #e8eefc;
+      }
+      .card {
+        background: #0e1630;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      .muted {
+        color: rgba(232, 238, 252, 0.75);
+      }
+      .kpi {
+        font-size: 26px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+      .chip {
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: rgba(255, 255, 255, 0.04);
+      }
+      .btn-primary {
+        background: #3b82f6;
+        border-color: #3b82f6;
+      }
+      .smallcode {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+          monospace;
+        font-size: 12px;
+      }
+      .legend-dot {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border-radius: 99px;
+        margin-right: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="navbar navbar-dark" style="background: #070b14">
+      <div class="container">
+        <a class="navbar-brand fw-semibold" href="/">Crime Hotspot AI</a>
+        <div class="d-flex gap-2">
+          <a class="btn btn-sm btn-outline-light" href="/commuter">Commuter</a>
+          <button class="btn btn-sm btn-primary" id="btnLocate">Use my location</button>
+        </div>
+      </div>
+    </nav>
+
+    <div class="container py-3 py-md-4">
+      <div class="row g-3">
+        <div class="col-12 col-xl-4">
+          <div class="card rounded-4 p-3">
+            <div class="d-flex justify-content-between align-items-start">
+              <div>
+                <div class="fw-semibold">Command Center</div>
+                <div class="muted small">Risk zones and patrol-relevant intel near your location.</div>
+              </div>
+              <button class="btn btn-sm btn-outline-light" id="btnRefresh">Refresh</button>
+            </div>
+
+            <hr class="border border-light border-opacity-10 my-3" />
+
+            <div class="d-flex flex-wrap gap-2">
+              <div class="chip rounded-pill px-3 py-2">
+                <div class="muted small">Location</div>
+                <div class="smallcode" id="txtLoc">Not set</div>
+              </div>
+              <div class="chip rounded-pill px-3 py-2">
+                <div class="muted small">Context</div>
+                <div class="smallcode" id="txtCtx">—</div>
+              </div>
+            </div>
+
+            <div class="row g-2 mt-2">
+              <div class="col-6">
+                <div class="card rounded-4 p-3">
+                  <div class="muted small">High-risk zones</div>
+                  <div class="kpi" id="kpiHigh">—</div>
+                </div>
+              </div>
+              <div class="col-6">
+                <div class="card rounded-4 p-3">
+                  <div class="muted small">Total hotspots</div>
+                  <div class="kpi" id="kpiTotal">—</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="mt-3">
+              <div class="fw-semibold mb-2">Explainable future-risk logic</div>
+              <div class="muted small">
+                Risk score = hotspot density × proximity × (time-of-day × day-of-week × seasonal multiplier).
+                This is manual logic that can be tuned for local conditions.
+              </div>
+            </div>
+
+            <hr class="border border-light border-opacity-10 my-3" />
+
+            <div class="fw-semibold mb-2">Quick filters</div>
+            <div class="row g-2">
+              <div class="col-12">
+                <label class="form-label muted small mb-1">Crime type</label>
+                <select class="form-select" id="crimeType">
+                  <option value="all" selected>All</option>
+                  <option>Theft</option>
+                  <option>Robbery</option>
+                  <option>Assault</option>
+                  <option>Rape</option>
+                  <option>Women Safety</option>
+                  <option>Accident</option>
+                  <option>NDPS</option>
+                  <option>Arms</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="mt-3">
+              <div class="fw-semibold mb-2">Legend</div>
+              <div class="muted small">
+                <span class="legend-dot" style="background: #ef4444"></span>High
+                <span class="legend-dot ms-3" style="background: #f59e0b"></span>Medium
+                <span class="legend-dot ms-3" style="background: #22c55e"></span>Low
+              </div>
+            </div>
+          </div>
+
+          <div class="card rounded-4 p-3 mt-3">
+            <div class="fw-semibold mb-2">Zone Intel (nearest)</div>
+            <div id="zoneList" class="d-grid gap-2"></div>
+          </div>
+        </div>
+
+        <div class="col-12 col-xl-8">
+          <div class="card rounded-4 p-3">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <div>
+                <div class="fw-semibold">Tactical Map</div>
+                <div class="muted small">Hotspots around current location + search/zoom.</div>
+              </div>
+              <div class="muted small">
+                <span id="txtStats">Loading stats…</span>
+              </div>
+            </div>
+            <div id="map" style="height: 70vh; min-height: 460px" class="rounded-4"></div>
+          </div>
+
+          <div class="row g-3 mt-1">
+            <div class="col-12 col-lg-6">
+              <div class="card rounded-4 p-3">
+                <div class="fw-semibold mb-2">Behavioural analysis (quick)</div>
+                <div class="muted small">
+                  Uses FIR counts per hour/day/season for the current dataset.
+                </div>
+                <div class="smallcode mt-2" id="statsBox">—</div>
+              </div>
+            </div>
+            <div class="col-12 col-lg-6">
+              <div class="card rounded-4 p-3">
+                <div class="fw-semibold mb-2">Patrol ops recommendation (basic)</div>
+                <div class="muted small">
+                  Suggests top 3 zones by score as priorities for patrol presence.
+                </div>
+                <div class="smallcode mt-2" id="opsBox">—</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script>
+      const fallback = { lat: 13.0827, lon: 80.2707 };
+      let current = { ...fallback };
+      let lastZones = [];
+
+      const map = L.map("map", { zoomControl: true }).setView([current.lat, current.lon], 12);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: "© OpenStreetMap",
+      }).addTo(map);
+
+      const zoneLayer = L.layerGroup().addTo(map);
+      let userMarker = null;
+
+      function levelColor(level) {
+        if (level === "high") return "#ef4444";
+        if (level === "medium") return "#f59e0b";
+        return "#22c55e";
+      }
+
+      function setLocText() {
+        document.getElementById("txtLoc").textContent = `${current.lat.toFixed(5)}, ${current.lon.toFixed(5)}`;
+      }
+
+      function setCtxText(ctx) {
+        document.getElementById("txtCtx").textContent =
+          `${ctx.time_bucket} | season=${ctx.season} | mult=${ctx.multiplier} | type=${ctx.crime_type}`.toLowerCase();
+      }
+
+      function renderZoneList(zones) {
+        const el = document.getElementById("zoneList");
+        el.innerHTML = "";
+        for (const z of zones.slice(0, 8)) {
+          const row = document.createElement("div");
+          const c = levelColor(z.level);
+          row.className = "p-2 rounded-3";
+          row.style.border = `1px solid rgba(255,255,255,0.10)`;
+          row.innerHTML = `
+            <div class="d-flex justify-content-between align-items-center">
+              <div><span class="legend-dot" style="background:${c}"></span><b>${(z.level || "").toUpperCase()}</b> score ${z.score}/100</div>
+              <div class="muted small">${z.distance_km.toFixed(2)} km</div>
+            </div>
+            <div class="muted small">density: ${z.density} • top: ${(z.top_crime_types || []).join(", ") || "—"}</div>
+          `;
+          row.addEventListener("click", () => map.setView([z.latitude, z.longitude], 15));
+          el.appendChild(row);
+        }
+      }
+
+      function renderOps(zones) {
+        const top = zones.slice(0, 3).map((z, i) => {
+          return `P${i + 1}: ${z.level.toUpperCase()} score=${z.score} density=${z.density} @ (${z.latitude.toFixed(
+            4
+          )},${z.longitude.toFixed(4)})`;
+        });
+        document.getElementById("opsBox").textContent = top.length ? top.join("\n") : "—";
+      }
+
+      async function refreshRisk() {
+        const crimeType = document.getElementById("crimeType").value || "all";
+        const r = await fetch(`/api/risk?lat=${current.lat}&lon=${current.lon}&crime_type=${encodeURIComponent(crimeType)}`);
+        const data = await r.json();
+        lastZones = data.zones || [];
+        setCtxText(data.context || { time_bucket: "—", season: "—", multiplier: "—", crime_type: crimeType });
+
+        const highCount = lastZones.filter((z) => z.level === "high").length;
+        document.getElementById("kpiHigh").textContent = highCount;
+        document.getElementById("kpiTotal").textContent = lastZones.length;
+
+        zoneLayer.clearLayers();
+        for (const z of lastZones) {
+          const c = levelColor(z.level);
+          L.circle([z.latitude, z.longitude], {
+            radius: Math.max(150, z.radius_km * 1000),
+            color: c,
+            fillColor: c,
+            fillOpacity: 0.2,
+            weight: 2,
+          })
+            .bindPopup(
+              `<div style="min-width:200px">
+                <div><b>${(z.level || "").toUpperCase()}</b> • score ${z.score}/100</div>
+                <div class="small">density: ${z.density}</div>
+                <div class="small">top: ${(z.top_crime_types || []).join(", ")}</div>
+                <div class="small">distance: ${z.distance_km} km</div>
+              </div>`
+            )
+            .addTo(zoneLayer);
+        }
+
+        if (userMarker) userMarker.remove();
+        userMarker = L.marker([current.lat, current.lon]).addTo(map).bindPopup("Patrol current location");
+
+        renderZoneList(lastZones);
+        renderOps(lastZones);
+      }
+
+      async function refreshStats() {
+        const r = await fetch("/api/stats");
+        const s = await r.json();
+        const txt = {
+          by_hour: s.by_hour,
+          by_day: s.by_day,
+          by_season: s.by_season,
+          top_types: Object.entries(s.by_type || {})
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 6),
+        };
+        document.getElementById("statsBox").textContent = JSON.stringify(txt, null, 2);
+        document.getElementById("txtStats").textContent = "Dataset stats loaded";
+      }
+
+      function locate() {
+        if (!navigator.geolocation) {
+          alert("Geolocation not supported.");
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            current.lat = pos.coords.latitude;
+            current.lon = pos.coords.longitude;
+            setLocText();
+            map.setView([current.lat, current.lon], 13);
+            refreshRisk();
+          },
+          () => {
+            alert("Location permission denied. Using fallback location.");
+            setLocText();
+            refreshRisk();
+          },
+          { enableHighAccuracy: true, timeout: 10000, maximumAge: 15000 }
+        );
+      }
+
+      document.getElementById("btnLocate").addEventListener("click", locate);
+      document.getElementById("btnRefresh").addEventListener("click", refreshRisk);
+      document.getElementById("crimeType").addEventListener("change", refreshRisk);
+
+      // init
+      setLocText();
+      refreshStats();
+      refreshRisk();
+    </script>
+  </body>
+</html>
+

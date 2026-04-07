@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Commuter Mode • Crime Hotspot AI</title>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <style>
+      body {
+        background: #0b1220;
+        color: #e8eefc;
+      }
+      .card {
+        background: #101a33;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      .muted {
+        color: rgba(232, 238, 252, 0.75);
+      }
+      .pill {
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: rgba(255, 255, 255, 0.04);
+      }
+      .alert-high {
+        border-left: 4px solid #ef4444;
+      }
+      .alert-medium {
+        border-left: 4px solid #f59e0b;
+      }
+      .alert-low {
+        border-left: 4px solid #22c55e;
+      }
+      .btn-primary {
+        background: #3b82f6;
+        border-color: #3b82f6;
+      }
+      .smallcode {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+          monospace;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="navbar navbar-dark" style="background: #0b1220">
+      <div class="container">
+        <a class="navbar-brand fw-semibold" href="/">Crime Hotspot AI</a>
+        <div class="d-flex gap-2">
+          <a class="btn btn-sm btn-outline-light" href="/patrol">Patrol</a>
+        </div>
+      </div>
+    </nav>
+
+    <div class="container py-3 py-md-4">
+      <div class="row g-3">
+        <div class="col-12 col-lg-4">
+          <div class="card rounded-4 p-3">
+            <div class="d-flex justify-content-between align-items-start">
+              <div>
+                <div class="fw-semibold">Your Safety Assistant</div>
+                <div class="muted small">Location-based risk alerts + safe routes.</div>
+              </div>
+              <button class="btn btn-sm btn-outline-light" id="btnLocate">Use my location</button>
+            </div>
+
+            <hr class="border border-light border-opacity-10 my-3" />
+
+            <div class="d-flex flex-wrap gap-2">
+              <div class="pill rounded-pill px-3 py-2">
+                <div class="muted small">Current location</div>
+                <div class="smallcode" id="txtLoc">Not set</div>
+              </div>
+              <div class="pill rounded-pill px-3 py-2">
+                <div class="muted small">Risk context</div>
+                <div class="smallcode" id="txtCtx">—</div>
+              </div>
+            </div>
+
+            <hr class="border border-light border-opacity-10 my-3" />
+
+            <div class="fw-semibold mb-2">Destination</div>
+            <label class="form-label muted small mb-1">Area / place name</label>
+            <input
+              class="form-control"
+              id="destName"
+              placeholder="e.g. T Nagar, Chennai / MG Road, Bengaluru / Connaught Place, Delhi"
+              autocomplete="off"
+              list="destSuggestions"
+            />
+            <datalist id="destSuggestions"></datalist>
+            <div class="mt-2 muted small" id="destResolved">Not selected yet.</div>
+
+            <input type="hidden" id="destLat" />
+            <input type="hidden" id="destLon" />
+
+            <div class="d-grid gap-2 mt-3">
+              <button class="btn btn-primary" id="btnRoute">Find safe route</button>
+              <button class="btn btn-outline-light" id="btnRefresh">Refresh risk zones</button>
+            </div>
+
+            <div class="mt-3">
+              <div class="fw-semibold mb-2">Alerts</div>
+              <div id="alerts" class="d-grid gap-2"></div>
+              <div class="muted small mt-2">
+                Alerts trigger when you are within a zone radius; color uses score thresholds.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-12 col-lg-8">
+          <div class="card rounded-4 p-3">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <div>
+                <div class="fw-semibold">Live Risk Map</div>
+                <div class="muted small">Green → low, amber → medium, red → high.</div>
+              </div>
+              <div class="muted small">
+                Location permission required for personalized alerts.
+              </div>
+            </div>
+            <div id="map" style="height: 68vh; min-height: 420px" class="rounded-4"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script>
+      const fallback = { lat: 13.0827, lon: 80.2707 };
+      let current = { ...fallback };
+      let lastZones = [];
+
+      const map = L.map("map", { zoomControl: true }).setView([current.lat, current.lon], 13);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: "© OpenStreetMap",
+      }).addTo(map);
+
+      const zoneLayer = L.layerGroup().addTo(map);
+      const routeLayer = L.layerGroup().addTo(map);
+      let userMarker = null;
+
+      function levelColor(level) {
+        if (level === "high") return "#ef4444";
+        if (level === "medium") return "#f59e0b";
+        return "#22c55e";
+      }
+
+      function setLocText() {
+        document.getElementById("txtLoc").textContent = `${current.lat.toFixed(5)}, ${current.lon.toFixed(5)}`;
+      }
+
+      function setCtxText(ctx) {
+        document.getElementById("txtCtx").textContent =
+          `${ctx.time_bucket} | season=${ctx.season} | mult=${ctx.multiplier}`.toLowerCase();
+      }
+
+      function renderAlerts(zones) {
+        const container = document.getElementById("alerts");
+        container.innerHTML = "";
+        const near = zones
+          .filter((z) => z.distance_km <= Math.max(0.2, z.radius_km))
+          .slice(0, 6);
+
+        if (near.length === 0) {
+          const el = document.createElement("div");
+          el.className = "text-success small";
+          el.textContent = "No nearby high-risk zones detected right now.";
+          container.appendChild(el);
+          return;
+        }
+
+        for (const z of near) {
+          const el = document.createElement("div");
+          const lvl = z.level || "low";
+          el.className = `p-2 rounded-3 bg-dark bg-opacity-25 alert-${lvl}`;
+          el.innerHTML = `
+            <div class="d-flex justify-content-between align-items-center">
+              <div><b>${lvl.toUpperCase()}</b> • score ${z.score}/100</div>
+              <div class="muted small">${z.distance_km.toFixed(2)} km</div>
+            </div>
+            <div class="muted small">Top crimes: ${(z.top_crime_types || []).join(", ") || "—"}</div>
+          `;
+          container.appendChild(el);
+        }
+      }
+
+      async function refreshRisk() {
+        const r = await fetch(`/api/risk?lat=${current.lat}&lon=${current.lon}&crime_type=all`);
+        const data = await r.json();
+        lastZones = data.zones || [];
+        setCtxText(data.context || { time_bucket: "—", season: "—", multiplier: "—" });
+
+        zoneLayer.clearLayers();
+        for (const z of lastZones) {
+          const c = levelColor(z.level);
+          L.circle([z.latitude, z.longitude], {
+            radius: Math.max(120, z.radius_km * 1000),
+            color: c,
+            fillColor: c,
+            fillOpacity: 0.18,
+            weight: 2,
+          })
+            .bindPopup(
+              `<div style="min-width:180px">
+                <div><b>${(z.level || "").toUpperCase()} RISK</b> • score ${z.score}/100</div>
+                <div class="small">density: ${z.density}</div>
+                <div class="small">top crimes: ${(z.top_crime_types || []).join(", ")}</div>
+                <div class="small">distance: ${z.distance_km} km</div>
+              </div>`
+            )
+            .addTo(zoneLayer);
+        }
+
+        // user marker
+        if (userMarker) userMarker.remove();
+        userMarker = L.marker([current.lat, current.lon]).addTo(map).bindPopup("You are here");
+
+        renderAlerts(lastZones);
+      }
+
+      function locate() {
+        if (!navigator.geolocation) {
+          alert("Geolocation not supported in this browser.");
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            current.lat = pos.coords.latitude;
+            current.lon = pos.coords.longitude;
+            setLocText();
+            map.setView([current.lat, current.lon], 14);
+            refreshRisk();
+          },
+          (err) => {
+            console.warn(err);
+            alert("Location permission denied. Using fallback location.");
+            setLocText();
+            refreshRisk();
+          },
+          { enableHighAccuracy: true, timeout: 10000, maximumAge: 15000 }
+        );
+      }
+
+      async function findRoute() {
+        const dlat = parseFloat(document.getElementById("destLat").value);
+        const dlon = parseFloat(document.getElementById("destLon").value);
+        if (!Number.isFinite(dlat) || !Number.isFinite(dlon)) {
+          alert("Please search and select a destination area first.");
+          return;
+        }
+        const r = await fetch(
+          `/api/route?start_lat=${current.lat}&start_lon=${current.lon}&end_lat=${dlat}&end_lon=${dlon}&crime_type=all`
+        );
+        const data = await r.json();
+        const route = data.route || [];
+
+        routeLayer.clearLayers();
+        const poly = L.polyline(route.map((p) => [p[0], p[1]]), {
+          color: "#22c55e",
+          weight: 5,
+          opacity: 0.9,
+        }).addTo(routeLayer);
+
+        L.marker([dlat, dlon]).addTo(routeLayer).bindPopup("Destination");
+        map.fitBounds(poly.getBounds().pad(0.2));
+      }
+
+      document.getElementById("btnLocate").addEventListener("click", locate);
+      document.getElementById("btnRefresh").addEventListener("click", refreshRisk);
+      document.getElementById("btnRoute").addEventListener("click", findRoute);
+
+      // Destination search (geocoding)
+      let geoTimer = null;
+      let lastGeoResults = [];
+
+      async function geocode(query) {
+        const r = await fetch(`/api/geocode?q=${encodeURIComponent(query)}`);
+        const data = await r.json();
+        return data.results || [];
+      }
+
+      function renderSuggestions(results) {
+        const dl = document.getElementById("destSuggestions");
+        dl.innerHTML = "";
+        for (const item of results) {
+          const opt = document.createElement("option");
+          opt.value = item.display_name;
+          dl.appendChild(opt);
+        }
+      }
+
+      function resolveSelected(text) {
+        const match = lastGeoResults.find((r) => r.display_name === text) || null;
+        if (!match) return;
+        document.getElementById("destLat").value = match.lat;
+        document.getElementById("destLon").value = match.lon;
+        document.getElementById("destResolved").textContent = `Selected: ${match.display_name} (${match.lat.toFixed(
+          5
+        )}, ${match.lon.toFixed(5)})`;
+      }
+
+      document.getElementById("destName").addEventListener("input", (e) => {
+        const q = (e.target.value || "").trim();
+        document.getElementById("destResolved").textContent = q ? "Searching…" : "Not selected yet.";
+        document.getElementById("destLat").value = "";
+        document.getElementById("destLon").value = "";
+
+        if (geoTimer) clearTimeout(geoTimer);
+        if (q.length < 3) return;
+
+        geoTimer = setTimeout(async () => {
+          try {
+            lastGeoResults = await geocode(q);
+            renderSuggestions(lastGeoResults);
+            document.getElementById("destResolved").textContent =
+              lastGeoResults.length ? "Pick a suggestion from the list." : "No matches found.";
+          } catch (err) {
+            console.warn(err);
+            document.getElementById("destResolved").textContent = "Search failed. Check internet connection.";
+          }
+        }, 350);
+      });
+
+      document.getElementById("destName").addEventListener("change", (e) => {
+        resolveSelected((e.target.value || "").trim());
+      });
+
+      // init
+      setLocText();
+      refreshRisk();
+    </script>
+  </body>
+</html>
+
